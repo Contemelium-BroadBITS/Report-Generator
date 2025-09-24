@@ -1,0 +1,169 @@
+# Sample Report Generator Configuration
+# This YAML file demonstrates all available configuration options and chart types
+
+# Step 0: Global Configuration (always required as the first step)
+- step: 0
+  type: config
+  cover_template_id: 'cover-template-id'  # ID of the cover page template
+  endcard_template_id: 'endcard-template-id'  # ID of the end card template
+  report_title: 'Comprehensive Sample Report'
+  report_description: 'This report demonstrates all available features of the Report Generator system, including various chart types, tables, and configuration options.'
+  issued_for: 'Client Name'  # Optional: Name of the client or recipient
+  default_palette: 'ocean_blue'  # Default color palette for all charts (optional)
+  default_legend: True  # Whether to show legends by default (optional)
+  
+  # Default configurations for each chart type (optional)
+  default_configuration:
+    - type: pie
+      legend: True
+      palette: 'crimson_red'
+    - type: bar
+      legend: True
+      palette: 'emerald_green'
+    - type: donut
+      legend: True
+      palette: 'violet'
+    - type: line
+      legend: True
+      palette: 'sunset_orange'
+    - type: table
+      palette: 'ocean_blue'
+
+# Step 1: Charts Section with Multiple Chart Types
+- step: 1
+  type: chart
+  template_id: 'charts-template-id'  # ID of the template to use for this step
+  charts:
+    # Pie Chart Example
+    - type: pie
+      title: 'Revenue Distribution by Product Category'
+      description: 'This pie chart shows the distribution of revenue across different product categories for the current fiscal year.'
+      data: 'revenue-data-integration-id'  # ID of the data integration to use
+      column: 'category'  # Column to use for categorization
+      legend: True  # Override default legend setting (optional)
+      palette: 'crimson_red'  # Override default palette (optional)
+    
+    # Bar Chart Example
+    - type: bar
+      title: 'Monthly Sales Comparison'
+      description: 'This bar chart compares monthly sales figures for the current year against the previous year.'
+      data: 'monthly-sales-integration-id'
+      abscissa: 'month'  # X-axis column
+      ordinate: 'sales'  # Y-axis column
+      legend: True
+      palette: 'emerald_green'
+    
+    # Line Chart Example
+    - type: line
+      title: 'Website Traffic Trend'
+      description: 'This line chart displays the trend of website visitors over time, broken down by traffic source.'
+      data: 'traffic-data-integration-id'
+      abscissa: 'date'  # X-axis column (typically date/time)
+      ordinate: 'visitors'  # Y-axis column
+      legend: True
+      palette: 'sunset_orange'
+
+# Step 2: Donut Charts Section
+- step: 2
+  type: chart
+  template_id: 'donut-charts-template-id'
+  charts:
+    # Donut Chart Example 1
+    - type: donut
+      title: 'Customer Segmentation'
+      description: 'This donut chart illustrates the breakdown of customers by segment, showing the proportion of each customer type in our database.'
+      data: 'customer-data-integration-id'
+      column: 'segment'  # Column to use for categorization
+      legend: True
+      palette: 'violet'
+    
+    # Donut Chart Example 2
+    - type: donut
+      title: 'Marketing Budget Allocation'
+      description: 'This donut chart shows how the marketing budget is distributed across different channels and campaigns.'
+      data: 'budget-data-integration-id'
+      column: 'channel'  # Column to use for categorization
+      legend: True
+      palette: 'ocean_blue'
+    
+    # Caption Example
+    - type: caption
+      title: 'Understanding the Data'
+      description: 'The charts above demonstrate the distribution of our customer base and marketing investments. This information is crucial for strategic decision-making in the upcoming quarter. Note the correlation between our highest-value customer segments and the channels receiving the most significant marketing investment.'
+
+# Step 3: Table Section
+- step: 3
+  type: table
+  template_id: 'table-template-id'
+  title: 'Quarterly Performance Metrics'
+  description: 'This table presents key performance indicators for each quarter, including revenue, expenses, profit margin, and customer acquisition cost.'
+  data: 'quarterly-metrics-integration-id'
+  columns: ['quarter', 'revenue', 'expenses', 'profit_margin', 'cac']  # Specific columns to include (optional)
+  palette: 'ocean_blue'  # Color palette for table styling (optional)
+
+# Step 4: Stacked Bar Chart Example
+- step: 4
+  type: chart
+  template_id: 'stacked-bar-template-id'
+  charts:
+    - type: bar
+      title: 'Revenue by Region and Product Line'
+      description: 'This stacked bar chart shows revenue distribution across different regions, broken down by product line.'
+      data: 'regional-sales-integration-id'
+      abscissa: 'region'  # X-axis column (regions)
+      ordinate: 'revenue'  # Y-axis column (revenue)
+      stack_by: 'product_line'  # Column to use for stacking (optional)
+      legend: True
+      palette: 'sunset_orange'
+
+# Step 5: Combination of Different Chart Types
+- step: 5
+  type: chart
+  template_id: 'mixed-charts-template-id'
+  charts:
+    # Another Line Chart Example
+    - type: line
+      title: 'Customer Satisfaction Over Time'
+      description: 'This line chart tracks customer satisfaction scores over the past 12 months.'
+      data: 'satisfaction-data-integration-id'
+      abscissa: 'month'
+      ordinate: 'satisfaction_score'
+      legend: True
+      palette: 'emerald_green'
+      
+    # Another Pie Chart Example
+    - type: pie
+      title: 'Support Ticket Categories'
+      description: 'This pie chart shows the distribution of support tickets by category.'
+      data: 'support-tickets-integration-id'
+      column: 'category'
+      legend: True
+      palette: 'crimson_red'
+      
+    # Another Caption
+    - type: caption
+      title: 'Key Insights'
+      description: 'The data presented reveals a correlation between customer satisfaction trends and the types of support issues encountered. Months with lower satisfaction scores typically coincide with an increase in technical support tickets, suggesting that technical issues significantly impact overall customer experience.'
+
+# Step 6: Another Table with Different Layout
+- step: 6
+  type: table
+  template_id: 'detailed-table-template-id'
+  title: 'Top 10 Customers by Revenue'
+  description: 'This table lists our top 10 customers by total revenue generated during the reporting period.'
+  data: 'customer-revenue-integration-id'
+  columns: ['customer_name', 'industry', 'total_revenue', 'num_transactions', 'avg_order_value']
+  palette: 'violet'
+
+# Step 7: Final Insights with Text-only Section
+- step: 7
+  type: chart
+  template_id: 'text-section-template-id'
+  charts:
+    - type: caption
+      title: 'Executive Summary'
+      description: 'This report highlights several key findings about our business performance. Revenue growth remains strong in the North America and Europe regions, with the Technology product line showing the highest profit margins. Customer satisfaction has improved quarter over quarter, with a notable reduction in technical support tickets. The marketing budget allocation shows a strategic shift toward digital channels, which aligns with our customer acquisition goals for the next fiscal year.'
+    
+    - type: caption
+      title: 'Recommendations'
+      description: 'Based on the data presented, we recommend: 1) Increasing investment in the Technology product line, particularly in the European market; 2) Expanding the technical support team to address the primary sources of customer dissatisfaction; 3) Further shifting marketing resources to the digital channels that show the highest conversion rates; 4) Developing targeted retention strategies for the top 10 customers identified in this report.'
