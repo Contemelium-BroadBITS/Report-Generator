@@ -1,6 +1,8 @@
 from OpExpertOperations import Interactions
 
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 from collections import Counter
 from datetime import datetime
@@ -283,9 +285,284 @@ class Console:
                 values = list(item.values())
                 formatted_data["labels"].append(values[0])
                 formatted_data["values"].append(values[1])
-            return formatted_data
+        return formatted_data
 
-    
+
+    def generate_charts_concurrently(self, chart_tasks):
+        """
+        Generate multiple charts concurrently using ThreadPoolExecutor.
+        
+        Args:
+            chart_tasks (list): List of dictionaries containing chart generation parameters
+                Each dict should have: {
+                    'key_variable': str,
+                    'chart_type': str, 
+                    'data': dict,
+                    'height': int,
+                    'width': int,
+                    'palette': str,
+                    'template': DocxTemplate,
+                    'inline_width': Inches,
+                    'inline_height': Inches
+                }
+                
+        Returns:
+            dict: Dictionary mapping key_variable to chart context data
+        """
+        if not chart_tasks:
+            return {}
+            
+        chart_results = {}
+        results_lock = Lock()
+        
+        def generate_single_chart(task):
+            try:
+                key_variable = task['key_variable']
+                chart_type = task['chart_type']
+                data = task['data']
+                height = task['height']
+                width = task['width']
+                palette = task['palette']
+                template = task['template']
+                inline_width = task['inline_width']
+                inline_height = task['inline_height']
+                
+                # Generate the chart based on type
+                chart_image = None
+                if chart_type == 'bar':
+                    chart_image = self._ReportGenerator__create_bar_chart(data, height, width, palette)
+                elif chart_type == 'donut':
+                    chart_image = self._ReportGenerator__create_donut_chart(data, height, width, palette)
+                elif chart_type == 'line':
+                    chart_image = self._ReportGenerator__create_line_chart(data, height, width, palette)
+                elif chart_type == 'pie':
+                    chart_image = self._ReportGenerator__create_pie_chart(data, height, width, palette)
+                
+                # Create inline image if chart was generated successfully
+                inline_image = None
+                if chart_image:
+                    inline_image = InlineImage(template, chart_image, width=inline_width, height=inline_height)
+                
+                with results_lock:
+                    chart_results[key_variable] = {
+                        f"{key_variable}_image": inline_image,
+                        'success': chart_image is not None
+                    }
+                
+                print(f"INFO at line {currentframe().f_lineno}: Successfully generated {chart_type} chart for {key_variable}")
+                return key_variable, True
+                
+            except Exception as e:
+                print(f"ERROR at line {currentframe().f_lineno}: Failed to generate chart for {task.get('key_variable', 'unknown')}: {e}")
+                with results_lock:
+                    chart_results[task.get('key_variable', 'unknown')] = {
+                        f"{task.get('key_variable', 'unknown')}_image": None,
+                        'success': False
+                    }
+                return task.get('key_variable', 'unknown'), False
+        
+        # Use ThreadPoolExecutor to generate charts concurrently
+        with ThreadPoolExecutor(max_workers=min(len(chart_tasks), 8)) as executor:
+            # Submit all chart generation tasks
+            future_to_task = {executor.submit(generate_single_chart, task): task 
+                             for task in chart_tasks}
+            
+            # Wait for all tasks to complete
+            for future in as_completed(future_to_task):
+                task = future_to_task[future]
+                try:
+                    future.result()  # This will raise any exception that occurred
+                except Exception as e:
+                    print(f"ERROR at line {currentframe().f_lineno}: Exception in chart generation thread for {task.get('key_variable', 'unknown')}: {e}")
+        
+        return chart_results
+
+
+    def _prepare_bar_chart_data_from_cache(self, cached_data, abscissa=None, ordinate=None):
+        """Prepare bar chart data from cached integration data"""
+        try:
+            if not cached_data:
+                return None
+            dataframe = DataFrame(cached_data)
+            columns = dataframe.columns.tolist()
+
+            if abscissa and abscissa not in columns:
+                print(f"Column '{abscissa}' does not exist in the cached dataset. Skipping...")
+                return None
+            if ordinate and ordinate not in columns:
+                print(f"Column '{ordinate}' does not exist in the cached dataset. Skipping...")
+                return None
+            
+            if not abscissa or not ordinate:
+                if len(columns) < 2:
+                    print(f"ERROR at line {currentframe().f_lineno}: Not enough columns in the cached dataset to determine abscissa and ordinate.")
+                    return None
+                abscissa = abscissa or columns[0]
+                # Find the next column that is number-like
+                ordinate = None
+                for column in columns:
+                    if column == abscissa:
+                        continue
+                    col_numeric = to_numeric(dataframe[column], errors='coerce').notna().all()
+                    if col_numeric:
+                        ordinate = column
+                        break
+                if not ordinate:
+                    print(f"ERROR at line {currentframe().f_lineno}: No suitable numeric column found for ordinate in cached dataset.")
+                    return None
+
+            # Ensure ordinate is numeric
+            dataframe[ordinate] = to_numeric(dataframe[ordinate], errors="coerce")
+            formatted_data = {
+                "abscissa": dataframe[abscissa].dropna().tolist(),
+                "ordinate": dataframe[ordinate].dropna().tolist(),
+                "abscissa_label": abscissa,
+                "ordinate_label": ordinate
+            }
+
+            if len(formatted_data['abscissa']) != len(formatted_data['ordinate']):
+                print(f"ERROR at line {currentframe().f_lineno}: Mismatched lengths between abscissa and ordinate in cached dataset.")
+                minimum_length = min(len(formatted_data['abscissa']), len(formatted_data['ordinate']))
+                formatted_data['abscissa'] = formatted_data['abscissa'][:minimum_length]
+                formatted_data['ordinate'] = formatted_data['ordinate'][:minimum_length]
+
+            return formatted_data
+        except Exception as e:
+            print(f"ERROR at line {currentframe().f_lineno}: Error preparing bar chart data from cache: {e}")
+            return None
+
+    def _prepare_donut_chart_data_from_cache(self, cached_data, column=None):
+        """Prepare donut chart data from cached integration data"""
+        try:
+            if not cached_data:
+                return None
+            
+            if column:            
+                if not any(column in item for item in cached_data):
+                    print(f"WARNING: Column '{column}' does not exist in the cached dataset. Skipping...")
+                    return None            
+                filtered_values = [item[column] for item in cached_data if column in item]            
+                counts = Counter(filtered_values)            
+                formatted_data = {
+                    "labels": list(counts.keys()),
+                    "values": list(counts.values())
+                }
+                return formatted_data
+            elif not column:
+                formatted_data = {
+                    "labels": [],
+                    "values": []
+                }
+                for item in cached_data:
+                    values = list(item.values())
+                    formatted_data["labels"].append(values[0])
+                    formatted_data["values"].append(values[1])
+                return formatted_data
+        except Exception as e:
+            print(f"ERROR at line {currentframe().f_lineno}: Error preparing donut chart data from cache: {e}")
+            return None
+
+    def _prepare_line_chart_data_from_cache(self, cached_data, abscissa=None, ordinate=None):
+        """Prepare line chart data from cached integration data"""
+        try:
+            if not cached_data:
+                return None
+            dataframe = DataFrame(cached_data)
+            columns = dataframe.columns.tolist()
+            
+            if abscissa and abscissa not in columns:
+                print(f"WARNING: Column '{abscissa}' does not exist in the cached dataset. Skipping...")
+                return None
+            if ordinate and ordinate not in columns:
+                print(f"WARNING: Column '{ordinate}' does not exist in the cached dataset. Skipping...")
+                return None
+            
+            if not abscissa or not ordinate:
+                if len(columns) < 2:
+                    print(f"ERROR at line {currentframe().f_lineno}: Not enough columns in the cached dataset to determine abscissa and ordinate.")
+                    return None
+                column_1 = abscissa or columns[0]
+                column_2 = ordinate or columns[1]
+
+            column_1_as_time = to_datetime(dataframe[column_1], errors = 'coerce').notna().all()
+            column_2_as_time = to_datetime(dataframe[column_2], errors = 'coerce').notna().all()
+            column_1_as_numeric = to_numeric(dataframe[column_1], errors = 'coerce').notna().all()
+            column_2_as_numeric = to_numeric(dataframe[column_2], errors = 'coerce').notna().all()
+
+            if column_1_as_time and not column_2_as_time:
+                abscissa, ordinate = column_1, column_2
+                dataframe[abscissa] = to_datetime(dataframe[abscissa], errors="coerce")
+                dataframe[ordinate] = to_numeric(dataframe[ordinate], errors="coerce")
+            elif column_2_as_time and not column_1_as_time:
+                abscissa, ordinate = column_2, column_1
+                dataframe[abscissa] = to_datetime(dataframe[abscissa], errors="coerce")
+                dataframe[ordinate] = to_numeric(dataframe[ordinate], errors="coerce")
+            elif column_1_as_numeric and column_2_as_numeric:
+                abscissa, ordinate = column_1, column_2
+                dataframe[abscissa] = to_numeric(dataframe[abscissa], errors="coerce")
+                dataframe[ordinate] = to_numeric(dataframe[ordinate], errors="coerce")
+            else:
+                print(f"ERROR: Could not auto-detect suitable abscissa and ordinate.")
+                return None
+            try:
+                dataframe = dataframe.sort_values(abscissa)
+            except Exception as error:
+                print(f"WARNING: Could not sort dataframe by abscissa '{abscissa}': {error}")
+
+            # Format the data so that the entries are reduced to less than 20 points to have a spline like chart.
+            if len(dataframe) > 20:
+                dataframe = dataframe.iloc[::len(dataframe) // 20, :]
+
+            formatted_data = {
+                "abscissa": dataframe[abscissa].dropna().tolist(),
+                "ordinate": dataframe[ordinate].dropna().tolist(), 
+                "abscissa_label": abscissa,
+                "ordinate_label": ordinate
+            }
+            
+            if len(formatted_data['abscissa']) != len(formatted_data['ordinate']):
+                print(f"ERROR at line {currentframe().f_lineno}: Mismatched lengths between abscissa and ordinate in cached dataset.")
+                minimum_length = min(len(formatted_data['abscissa']), len(formatted_data['ordinate']))
+                formatted_data['abscissa'] = formatted_data['abscissa'][:minimum_length]
+                formatted_data['ordinate'] = formatted_data['ordinate'][:minimum_length]
+
+            return formatted_data
+        except Exception as e:
+            print(f"ERROR at line {currentframe().f_lineno}: Error preparing line chart data from cache: {e}")
+            return None
+
+    def _prepare_pie_chart_data_from_cache(self, cached_data, column=None):
+        """Prepare pie chart data from cached integration data"""
+        try:
+            if not cached_data:
+                return None
+            
+            if column:            
+                if not any(column in item for item in cached_data):
+                    print(f"WARNING: Column '{column}' does not exist in the cached dataset. Skipping...")
+                    return None            
+                filtered_values = [item[column] for item in cached_data if column in item]            
+                counts = Counter(filtered_values)            
+                formatted_data = {
+                    "labels": list(counts.keys()),
+                    "values": list(counts.values())
+                }
+                return formatted_data
+            elif not column:
+                formatted_data = {
+                    "labels": [],
+                    "values": []
+                }
+                for item in cached_data:
+                    values = list(item.values())
+                    formatted_data["labels"].append(values[0])
+                    formatted_data["values"].append(values[1])
+                return formatted_data
+        except Exception as e:
+            print(f"ERROR at line {currentframe().f_lineno}: Error preparing pie chart data from cache: {e}")
+            return None
+
+
     def fetch_data_for_table(self, integration_id, columns = []):
         
         data = self.operator.getIntegrationWithID(integration_id)
@@ -298,6 +575,52 @@ class Console:
             return filtered_data
         else:
             return data
+
+
+    def fetch_all_integration_data_concurrently(self, integration_ids):
+        """
+        Fetch data from multiple integration IDs concurrently using ThreadPoolExecutor.
+        
+        Args:
+            integration_ids (list): List of unique integration IDs to fetch data for
+            
+        Returns:
+            dict: Dictionary mapping integration_id to fetched data
+        """
+        if not integration_ids:
+            return {}
+            
+        data_cache = {}
+        data_lock = Lock()
+        
+        def fetch_single_integration(integration_id):
+            try:
+                data = self.operator.getIntegrationWithID(integration_id)
+                with data_lock:
+                    data_cache[integration_id] = data
+                print(f"INFO at line {currentframe().f_lineno}: Successfully fetched data for integration {integration_id}")
+                return integration_id, data
+            except Exception as e:
+                print(f"ERROR at line {currentframe().f_lineno}: Failed to fetch data for integration {integration_id}: {e}")
+                with data_lock:
+                    data_cache[integration_id] = None
+                return integration_id, None
+        
+        # Use ThreadPoolExecutor to fetch data concurrently
+        with ThreadPoolExecutor(max_workers=min(len(integration_ids), 10)) as executor:
+            # Submit all fetch tasks
+            future_to_id = {executor.submit(fetch_single_integration, integration_id): integration_id 
+                           for integration_id in integration_ids}
+            
+            # Wait for all tasks to complete
+            for future in as_completed(future_to_id):
+                integration_id = future_to_id[future]
+                try:
+                    future.result()  # This will raise any exception that occurred
+                except Exception as e:
+                    print(f"ERROR at line {currentframe().f_lineno}: Exception in data fetching thread for {integration_id}: {e}")
+        
+        return data_cache
 
 
 
@@ -1298,15 +1621,41 @@ class ReportGenerator(Console):
                 print(f"WARNING at line {currentframe().f_lineno}: Unsupported step type: {step.get('type')}. This step will be ignored.")
                 continue
         
+        # PHASE 1: Collect all unique integration IDs for concurrent data fetching
+        print(f"INFO at line {currentframe().f_lineno}: Phase 1 - Collecting integration IDs for concurrent data fetching...")
+        all_integration_ids = set()
+        
+        for page in page_configuration:
+            if page.get('type').lower() == 'chart':
+                for structure in page.get('charts', []):
+                    if structure.get('type', '').lower() != 'caption':
+                        integration_id = structure.get('data', '')
+                        if integration_id:
+                            all_integration_ids.add(integration_id)
+            elif page.get('type').lower() == 'table':
+                integration_id = page.get('data', '')
+                if integration_id:
+                    all_integration_ids.add(integration_id)
+        
+        # PHASE 2: Fetch all data concurrently
+        print(f"INFO at line {currentframe().f_lineno}: Phase 2 - Fetching data for {len(all_integration_ids)} integrations concurrently...")
+        data_cache = self.fetch_all_integration_data_concurrently(list(all_integration_ids))
+        print(f"INFO at line {currentframe().f_lineno}: Completed concurrent data fetching. {len([k for k, v in data_cache.items() if v is not None])} successful fetches.")
+        
+        # PHASE 3: Process each page, now with multi-threaded chart generation
         for page in page_configuration:
             step_name = page.get('step', '<UNKNOWN_STEP>')
             template = self.fetch_template(page.get('template_id', ''))
             if not template:
                 print(f"ERROR at line {currentframe().f_lineno}: Failed to load template for step {step_name}. This step will be skipped.")
+                continue
             
             context = {}
             if page.get('type').lower() == 'chart':
+                # Collect all chart tasks for concurrent generation
+                chart_tasks = []
                 caption_index = 0
+                
                 for index, structure in enumerate(page.get('charts', [])):
                     if structure.get('type', None).lower() == 'caption':
                         caption_index += 1
@@ -1323,6 +1672,7 @@ class ReportGenerator(Console):
                             }
                             self.list_of_contents.append(content_meta)
                         continue
+                    
                     key_variable = f"chart{(index + 1) - caption_index}"
                     title = structure.get('title', f'Chart {(index + 1) - caption_index}')
                     description = structure.get('description', '')
@@ -1331,58 +1681,83 @@ class ReportGenerator(Console):
                     add_to_contents = structure.get('add_to_contents', True)
                     
                     criteria = self.__locate_target_cell_and_size(template, key_variable, structure)
-                    # print(criteria)
                     if criteria is None:
                         print(f"ERROR at line {currentframe().f_lineno}: Could not locate target cell for {key_variable} in step {step_name}. This chart will be skipped.")
                         continue
-                    else:
-                        try:
-                            palette = criteria['palette']
-                            width = criteria['width_px']
-                            height = criteria['height_px']
-                            inline_width = criteria['inline_width']
-                            inline_height = criteria['inline_height']
-                            # inline_width = criteria['width_in']
-                            # inline_height = criteria['height_in']
-                        except Exception:
-                            print(f"ERROR at line {currentframe().f_lineno}: Could not determine size or palette for {key_variable} in step {step_name}. This chart will be skipped.")
-                            continue
+                    
+                    try:
+                        palette = criteria['palette']
+                        width = criteria['width_px']
+                        height = criteria['height_px']
+                        inline_width = criteria['inline_width']
+                        inline_height = criteria['inline_height']
+                    except Exception:
+                        print(f"ERROR at line {currentframe().f_lineno}: Could not determine size or palette for {key_variable} in step {step_name}. This chart will be skipped.")
+                        continue
                     
                     chart_type = structure.get('type', None).lower()
                     if chart_type not in self.available_chart_types:
                         print(f"WARNING at line {currentframe().f_lineno}: Unsupported chart type: {chart_type} in step {step_name}. This chart will be ignored.")
                         continue
+                    
+                    # Get cached data and prepare it for the chart type
+                    integration_id = structure.get('data', '')
+                    cached_data = data_cache.get(integration_id)
+                    if cached_data is None:
+                        print(f"ERROR at line {currentframe().f_lineno}: No data available for integration {integration_id} in step {step_name}. This chart will be skipped.")
+                        continue
+                    
+                    # Prepare data based on chart type using cached data
+                    data = None
                     if chart_type == 'bar':
                         abscissa = structure.get('abscissa', [])
                         ordinate = structure.get('ordinate', [])
-                        data = self.fetch_data_for_bar_chart(structure.get('data', ''), abscissa, ordinate)
-                        chart_image = self.__create_bar_chart(data, height, width, palette)
+                        data = self._prepare_bar_chart_data_from_cache(cached_data, abscissa, ordinate)
                     elif chart_type == 'donut':
                         column = structure.get('column', '')
-                        data = self.fetch_data_for_donut_chart(structure.get('data', ''), column)
-                        chart_image = self.__create_donut_chart(data, height, width, palette)
+                        data = self._prepare_donut_chart_data_from_cache(cached_data, column)
                     elif chart_type == 'line':
                         abscissa = structure.get('abscissa', [])
                         ordinate = structure.get('ordinate', [])
-                        data = self.fetch_data_for_line_chart(structure.get('data', ''), abscissa, ordinate)
-                        chart_image = self.__create_line_chart(data, height, width, palette)
+                        data = self._prepare_line_chart_data_from_cache(cached_data, abscissa, ordinate)
                     elif chart_type == 'pie':
                         column = structure.get('column', '')
-                        data = self.fetch_data_for_pie_chart(structure.get('data', ''), column)
-                        chart_image = self.__create_pie_chart(data, height, width, palette)
-                    else:
-                        print(f"WARNING at line {currentframe().f_lineno}: Unsupported chart type: {chart_type} in step {step_name}. This chart will be ignored.")
+                        data = self._prepare_pie_chart_data_from_cache(cached_data, column)
+                    
+                    if data is None:
+                        print(f"ERROR at line {currentframe().f_lineno}: Failed to prepare data for {chart_type} chart in step {step_name}. This chart will be skipped.")
                         continue
-                    print(f"Width = {width}, Height = {height}, Inline Width = {inline_width}, Inline Height = {inline_height}")
-                    context[f"{key_variable}_image"] = InlineImage(template, chart_image, width = inline_width, height = inline_height) if chart_image else None
+                    
+                    # Add chart task for concurrent generation
+                    chart_tasks.append({
+                        'key_variable': key_variable,
+                        'chart_type': chart_type,
+                        'data': data,
+                        'height': height,
+                        'width': width,
+                        'palette': palette,
+                        'template': template,
+                        'inline_width': inline_width,
+                        'inline_height': inline_height
+                    })
+                    
                     if add_to_contents:
                         content_meta = {
                             'title': title, 
                             'page': self.current_page + 1
                         }
                         self.list_of_contents.append(content_meta)
-                    # print(f"INFO at line {currentframe().f_lineno}: Processed {chart_type} chart for step {step_name}.")
-                    # print(f"INFO at line {currentframe().f_lineno}: Fetched data for {chart_type} chart in step {step_name}.\nFetched Data: {data}\n\n")
+                
+                # Generate all charts for this page concurrently
+                if chart_tasks:
+                    print(f"INFO at line {currentframe().f_lineno}: Generating {len(chart_tasks)} charts concurrently for step {step_name}...")
+                    chart_results = self.generate_charts_concurrently(chart_tasks)
+                    
+                    # Add chart results to context
+                    for key_variable, result in chart_results.items():
+                        context.update(result)
+                        if result.get('success'):
+                            print(f"INFO at line {currentframe().f_lineno}: Successfully processed chart {key_variable} in step {step_name}.")
             
             elif page.get('type').lower() == 'table':
                 title = page.get('title', 'Table')
@@ -1431,7 +1806,6 @@ class ReportGenerator(Console):
             # self.current_composition.append(template.docx)
             self.current_page += page_count_for_this_step
             print(f"INFO at line {currentframe().f_lineno}: Processed step {step_name} with {page_count_for_this_step} page(s).")
-            # template.save(os.path.join(self.current_report_directory, f"intermediate_{str(step_name).replace(' ', '_')}.docx"))
         
         def __generate_table_of_contents(list_of_contents, template, table_of_contents_page_count = 0):
             
@@ -1594,6 +1968,10 @@ class ReportGenerator(Console):
 
 if __name__ == "__main__":
     
+    start_time = datetime.now()
     generator = ReportGenerator()
     yaml_file = os.path.join(generator.current_directory, '2025091600.yaml')
     generator.generate_report(yaml_file, 'yaml-file')
+    end_time = datetime.now()
+    time_taken_in_seconds = (end_time - start_time).total_seconds() 
+    print(f"Report generation completed in {time_taken_in_seconds} seconds.")
